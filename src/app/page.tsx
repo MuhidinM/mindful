@@ -1,36 +1,132 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Wallet } from "lucide-react";
 
-import {
-  addRedemption,
-  getAllLogs,
-  getRedemptions,
-  getTaskCount,
-} from "@/lib/local-data";
+import { redeemFunds } from "@/app/actions/redeem";
+import { supabase } from "@/lib/supabase";
 import { useChild } from "@/store/child-context";
+
+type ChildRow = {
+  id: string;
+  name: string;
+  color: "Teal" | "Coral";
+};
+
+type DailyLogRow = {
+  date: string;
+  fajr: boolean;
+  dhuhr: boolean;
+  asr: boolean;
+  maghrib: boolean;
+  isha: boolean;
+  quran: boolean;
+  peaceful_day: boolean;
+};
+
+type RedemptionRow = {
+  amount: number;
+  date: string;
+};
+
+const TASK_KEYS = [
+  "fajr",
+  "dhuhr",
+  "asr",
+  "maghrib",
+  "isha",
+  "quran",
+  "peaceful_day",
+] as const;
 
 export default function HomePage() {
   const { activeChild, selectedChild } = useChild();
+  const [childRow, setChildRow] = useState<ChildRow | null>(null);
+  const [dailyLogs, setDailyLogs] = useState<DailyLogRow[]>([]);
+  const [redemptions, setRedemptions] = useState<RedemptionRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showRedeemModal, setShowRedeemModal] = useState(false);
   const [redeemAmount, setRedeemAmount] = useState("");
   const [feedback, setFeedback] = useState("");
-  const [revision, setRevision] = useState(0);
-  const childLogs = getAllLogs()
-    .filter((log) => log.child === selectedChild)
-    .slice();
-  const totalTasks = childLogs.reduce((sum, log) => sum + getTaskCount(log), 0);
-  const totalEarned = totalTasks * 1.5;
-  const redeemed = getRedemptions(selectedChild).reduce(
-    (sum, item) => sum + item.amount,
-    0,
+  const [isRedeeming, setIsRedeeming] = useState(false);
+
+  const refreshDashboard = useCallback(async () => {
+    setIsLoading(true);
+    setFeedback("");
+
+    const expectedColor = selectedChild === "child1" ? "Teal" : "Coral";
+
+    const { data: child, error: childError } = await supabase
+      .from("children")
+      .select("id,name,color")
+      .eq("color", expectedColor)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (childError || !child) {
+      setChildRow(null);
+      setDailyLogs([]);
+      setRedemptions([]);
+      setIsLoading(false);
+      setFeedback("Could not find child profile in database.");
+      return;
+    }
+
+    setChildRow(child as ChildRow);
+
+    const [logsResponse, redemptionsResponse] = await Promise.all([
+      supabase
+        .from("daily_logs")
+        .select("date,fajr,dhuhr,asr,maghrib,isha,quran,peaceful_day")
+        .eq("child_id", child.id),
+      supabase
+        .from("redemptions")
+        .select("amount,date")
+        .eq("child_id", child.id),
+    ]);
+
+    if (logsResponse.error || redemptionsResponse.error) {
+      setDailyLogs([]);
+      setRedemptions([]);
+      setFeedback("Failed to load dashboard data.");
+      setIsLoading(false);
+      return;
+    }
+
+    setDailyLogs((logsResponse.data ?? []) as DailyLogRow[]);
+    setRedemptions((redemptionsResponse.data ?? []) as RedemptionRow[]);
+    setIsLoading(false);
+  }, [selectedChild]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshDashboard();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshDashboard]);
+
+  const totalTasks = useMemo(
+    () =>
+      dailyLogs.reduce((sum, log) => {
+        const count = TASK_KEYS.reduce(
+          (taskSum, key) => taskSum + (log[key] ? 1 : 0),
+          0,
+        );
+        return sum + count;
+      }, 0),
+    [dailyLogs],
   );
+  const totalEarned = totalTasks * 1.5;
+  const redeemed = redemptions.reduce((sum, row) => sum + Number(row.amount), 0);
   const balance = Number((totalEarned - redeemed).toFixed(2));
   const todayKey = new Date().toISOString().slice(0, 10);
-  const todayLog = childLogs.find((log) => log.date === todayKey) ?? null;
-  const todayCount = getTaskCount(todayLog);
+  const todayLog = dailyLogs.find((log) => log.date === todayKey) ?? null;
+  const todayCount = todayLog
+    ? TASK_KEYS.reduce((sum, key) => sum + (todayLog[key] ? 1 : 0), 0)
+    : 0;
 
-  const onRedeem = () => {
+  const onRedeem = async () => {
     const amount = Number(redeemAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setFeedback("Enter a valid amount");
@@ -40,18 +136,28 @@ export default function HomePage() {
       setFeedback("Amount exceeds current balance");
       return;
     }
-    addRedemption({
-      child: selectedChild,
-      amount: Number(amount.toFixed(2)),
-      createdAt: new Date().toISOString(),
-    });
+
+    if (!childRow) {
+      setFeedback("Child profile is not loaded yet.");
+      return;
+    }
+
+    setIsRedeeming(true);
+    const result = await redeemFunds({ childId: childRow.id, amount });
+    setIsRedeeming(false);
+    if (!result.ok) {
+      setFeedback(result.error ?? "Redeem failed.");
+      return;
+    }
+
     setRedeemAmount("");
     setFeedback("Redeemed successfully");
-    setRevision((prev) => prev + 1);
+    setShowRedeemModal(false);
+    await refreshDashboard();
   };
 
   return (
-    <div className="space-y-6" data-revision={revision}>
+    <div className="space-y-6">
       <section className="space-y-1">
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">
           Overview
@@ -59,6 +165,9 @@ export default function HomePage() {
         <h2 className="font-heading text-3xl font-extrabold tracking-tight text-foreground">
           Good morning, curator.
         </h2>
+        {childRow ? (
+          <p className="text-sm text-muted-foreground">{childRow.name}</p>
+        ) : null}
       </section>
 
       <section className="rounded-lg bg-surface-lowest p-6 shadow-(--shadow-ambient)">
@@ -73,27 +182,14 @@ export default function HomePage() {
             <Wallet className={`size-5 ${activeChild.accentTextClass}`} />
           </span>
         </div>
-        <div className="mt-6 space-y-2">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={redeemAmount}
-              onChange={(event) => setRedeemAmount(event.target.value)}
-              placeholder="Amount to redeem"
-              className="h-11 flex-1 rounded-lg bg-surface-low px-3 text-sm text-foreground ghost-border focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-            <button
-              type="button"
-              onClick={onRedeem}
-              className={`h-11 rounded-lg px-4 text-sm font-bold text-primary-foreground ${activeChild.accentGradientClass}`}
-            >
-              Redeem
-            </button>
-          </div>
-          {feedback ? <p className="text-xs text-muted-foreground">{feedback}</p> : null}
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowRedeemModal(true)}
+          className={`mt-6 h-11 w-full rounded-lg px-4 text-sm font-bold text-primary-foreground ${activeChild.accentGradientClass}`}
+        >
+          Redeem Funds
+        </button>
+        {feedback ? <p className="mt-2 text-xs text-muted-foreground">{feedback}</p> : null}
       </section>
 
       <section className="rounded-lg bg-surface-lowest p-6 text-center shadow-(--shadow-ambient)">
@@ -122,16 +218,56 @@ export default function HomePage() {
             >
               <div>
                 <p className="text-sm font-semibold text-foreground">{label}</p>
-                <p className="text-xs text-muted-foreground">No synced logs yet</p>
+                <p className="text-xs text-muted-foreground">
+                  {isLoading ? "Loading..." : "Synced from Supabase"}
+                </p>
               </div>
               <p className={`text-sm font-extrabold ${activeChild.accentTextClass}`}>
-                +0.0 Birr
+                {label === "Yesterday"
+                  ? `${(dailyLogs.length > 0 ? 1.5 : 0).toFixed(1)} Birr`
+                  : "+0.0 Birr"}
               </p>
             </div>
           ))}
         </div>
       </section>
 
+      {showRedeemModal ? (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-sm rounded-lg bg-surface-lowest p-5 shadow-(--shadow-ambient)">
+            <h3 className="font-heading text-xl font-bold text-foreground">Redeem Funds</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Current balance: {balance.toFixed(2)} Birr
+            </p>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={redeemAmount}
+              onChange={(event) => setRedeemAmount(event.target.value)}
+              placeholder="Exact amount"
+              className="mt-4 h-11 w-full rounded-lg bg-surface-low px-3 text-sm text-foreground ghost-border focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRedeemModal(false)}
+                className="h-10 rounded-lg px-3 text-sm font-semibold text-muted-foreground hover:bg-surface-low"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isRedeeming}
+                onClick={onRedeem}
+                className={`h-10 rounded-lg px-4 text-sm font-bold text-primary-foreground ${activeChild.accentGradientClass}`}
+              >
+                {isRedeeming ? "Saving..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

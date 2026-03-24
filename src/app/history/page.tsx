@@ -1,20 +1,35 @@
 "use client";
 
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Star } from "lucide-react";
 import Papa from "papaparse";
 
+import { importHistoryLogs } from "@/app/actions/import-history";
+import { supabase } from "@/lib/supabase";
 import { useChild } from "@/store/child-context";
-import {
-  bulkUpsertLogs,
-  DailyLog,
-  getAllLogs,
-  getTaskCount,
-  TASK_KEYS,
-  TaskKey,
-} from "@/lib/local-data";
 
 const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const TASK_KEYS = [
+  "fajr",
+  "dhuhr",
+  "asr",
+  "maghrib",
+  "isha",
+  "quran",
+  "peaceful_day",
+] as const;
+type TaskKey = (typeof TASK_KEYS)[number];
+type DailyLogRow = {
+  child_id: string;
+  date: string;
+  fajr: boolean;
+  dhuhr: boolean;
+  asr: boolean;
+  maghrib: boolean;
+  isha: boolean;
+  quran: boolean;
+  peaceful_day: boolean;
+};
 
 export default function HistoryPage() {
   const { activeChild } = useChild();
@@ -24,6 +39,9 @@ export default function HistoryPage() {
   });
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [childId, setChildId] = useState<string | null>(null);
+  const [childLogs, setChildLogs] = useState<DailyLogRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const monthTitle = new Intl.DateTimeFormat("en-US", {
@@ -45,7 +63,39 @@ export default function HistoryPage() {
     });
   }, [monthCursor]);
 
-  const childLogs = getAllLogs().filter((entry) => entry.child === activeChild.key);
+  const loadHistory = useCallback(async () => {
+    const expectedColor = activeChild.key === "child1" ? "Teal" : "Coral";
+    const { data: child, error: childError } = await supabase
+      .from("children")
+      .select("id,color")
+      .eq("color", expectedColor)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (childError || !child) {
+      setChildId(null);
+      setChildLogs([]);
+      return;
+    }
+    setChildId(child.id as string);
+
+    const { data: logs, error: logsError } = await supabase
+      .from("daily_logs")
+      .select("child_id,date,fajr,dhuhr,asr,maghrib,isha,quran,peaceful_day")
+      .eq("child_id", child.id);
+    if (logsError) {
+      setChildLogs([]);
+      return;
+    }
+    setChildLogs((logs ?? []) as DailyLogRow[]);
+  }, [activeChild.key]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadHistory();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadHistory]);
 
   const shiftMonth = (delta: number) => {
     setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
@@ -59,6 +109,11 @@ export default function HistoryPage() {
     return childLogs.find((entry) => entry.date === key) ?? null;
   };
 
+  const getTaskCount = (log: DailyLogRow | null) => {
+    if (!log) return 0;
+    return TASK_KEYS.reduce((sum, key) => sum + (log[key] ? 1 : 0), 0);
+  };
+
   const onPickFile = () => fileInputRef.current?.click();
 
   const onUploadFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -68,15 +123,19 @@ export default function HistoryPage() {
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (result) => {
-        const parsed: DailyLog[] = result.data
+      complete: async (result) => {
+        if (!childId) {
+          setUploadMessage("Child profile is not loaded.");
+          return;
+        }
+        const parsed = result.data
           .map((row) => {
             const date = row.Date?.trim();
             if (!date) return null;
 
             const getBool = (key: string) => row[key]?.trim() === "1";
-            const entry: DailyLog = {
-              child: activeChild.key,
+            const entry = {
+              child_id: childId,
               date,
               fajr: getBool("Fajr"),
               dhuhr: getBool("Dhuhr"),
@@ -88,10 +147,17 @@ export default function HistoryPage() {
             };
             return entry;
           })
-          .filter((entry): entry is DailyLog => Boolean(entry));
+          .filter((entry): entry is DailyLogRow => Boolean(entry));
 
-        bulkUpsertLogs(parsed);
-        setUploadMessage(`Imported ${parsed.length} rows`);
+        setIsUploading(true);
+        const importResult = await importHistoryLogs(parsed);
+        setIsUploading(false);
+        if (!importResult.ok) {
+          setUploadMessage(importResult.error ?? "Import failed");
+          return;
+        }
+        setUploadMessage(`Imported ${importResult.count ?? parsed.length} rows`);
+        await loadHistory();
       },
       error: () => {
         setUploadMessage("Import failed");
@@ -202,9 +268,10 @@ export default function HistoryPage() {
           <button
             type="button"
             onClick={onPickFile}
+            disabled={isUploading}
             className={`mt-4 rounded-full px-4 py-2 text-xs font-bold text-primary-foreground ${activeChild.accentGradientClass}`}
           >
-            Select File
+            {isUploading ? "Importing..." : "Select File"}
           </button>
           {uploadMessage ? (
             <p className="mt-2 text-xs text-muted-foreground">{uploadMessage}</p>

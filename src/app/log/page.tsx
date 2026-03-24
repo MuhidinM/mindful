@@ -1,17 +1,43 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+
+import { supabase } from "@/lib/supabase";
 import { useChild } from "@/store/child-context";
-import {
-  createEmptyLog,
-  formatDateHeading,
-  getLog,
-  getTaskCount,
-  TaskKey,
-  toDateKey,
-  upsertLog,
-} from "@/lib/local-data";
+
+type TaskKey =
+  | "fajr"
+  | "dhuhr"
+  | "asr"
+  | "maghrib"
+  | "isha"
+  | "quran"
+  | "peaceful_day";
+
+type DailyLogDraft = {
+  child_id: string;
+  date: string;
+  fajr: boolean;
+  dhuhr: boolean;
+  asr: boolean;
+  maghrib: boolean;
+  isha: boolean;
+  quran: boolean;
+  peaceful_day: boolean;
+};
+
+function toDateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDateHeading(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
 
 const taskRows: { key: TaskKey; label: string }[] = [
   { key: "fajr", label: "Fajr" },
@@ -80,23 +106,160 @@ function LogEditor({
   dateKey: string;
 }) {
   const { activeChild } = useChild();
-  const [saveMessage, setSaveMessage] = useState("");
-  const [draft, setDraft] = useState(() => {
-    const existing = getLog(child, dateKey);
-    return existing ?? createEmptyLog(child, dateKey);
-  });
+  const [draft, setDraft] = useState<DailyLogDraft | null>(null);
+  const [childId, setChildId] = useState<string | null>(null);
+  const [message, setMessage] = useState("Loading...");
 
-  const toggleTask = (key: TaskKey) => {
-    setDraft((prev) => ({ ...prev, [key]: !prev[key] }));
+  useEffect(() => {
+    let isActive = true;
+
+    const hydrate = async () => {
+      setMessage("Loading...");
+      const expectedColor = child === "child1" ? "Teal" : "Coral";
+      const { data: childRow, error: childError } = await supabase
+        .from("children")
+        .select("id,color")
+        .eq("color", expectedColor)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (!isActive) return;
+      if (childError || !childRow) {
+        setDraft(null);
+        setChildId(null);
+        setMessage("Child profile missing.");
+        return;
+      }
+
+      const resolvedChildId = childRow.id as string;
+      setChildId(resolvedChildId);
+
+      const { data: logRow, error: logError } = await supabase
+        .from("daily_logs")
+        .select("child_id,date,fajr,dhuhr,asr,maghrib,isha,quran,peaceful_day")
+        .eq("child_id", resolvedChildId)
+        .eq("date", dateKey)
+        .maybeSingle();
+
+      if (!isActive) return;
+      if (logError) {
+        setMessage("Unable to load daily log.");
+        return;
+      }
+
+      setDraft(
+        (logRow as DailyLogDraft | null) ?? {
+          child_id: resolvedChildId,
+          date: dateKey,
+          fajr: false,
+          dhuhr: false,
+          asr: false,
+          maghrib: false,
+          isha: false,
+          quran: false,
+          peaceful_day: false,
+        },
+      );
+      setMessage("");
+    };
+
+    void hydrate();
+
+    return () => {
+      isActive = false;
+    };
+  }, [child, dateKey]);
+
+  useEffect(() => {
+    if (!childId) return;
+    const channel = supabase
+      .channel(`daily_logs_${childId}_${dateKey}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "daily_logs",
+          filter: `child_id=eq.${childId}`,
+        },
+        (payload) => {
+          const record = (payload.new ?? payload.old) as
+            | (DailyLogDraft & { id?: string })
+            | undefined;
+          if (!record || record.date !== dateKey) return;
+          if (payload.eventType === "DELETE") {
+            setDraft((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    fajr: false,
+                    dhuhr: false,
+                    asr: false,
+                    maghrib: false,
+                    isha: false,
+                    quran: false,
+                    peaceful_day: false,
+                  }
+                : prev,
+            );
+            return;
+          }
+          setDraft((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  fajr: record.fajr,
+                  dhuhr: record.dhuhr,
+                  asr: record.asr,
+                  maghrib: record.maghrib,
+                  isha: record.isha,
+                  quran: record.quran,
+                  peaceful_day: record.peaceful_day,
+                }
+              : prev,
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [childId, dateKey]);
+
+  const persistDraft = async (next: DailyLogDraft) => {
+    const { error } = await supabase.from("daily_logs").upsert(next, {
+      onConflict: "child_id,date",
+    });
+    if (error) {
+      setMessage("Sync failed. Try again.");
+      return false;
+    }
+    setMessage("Synced");
+    window.setTimeout(() => setMessage(""), 1200);
+    return true;
   };
 
-  const onSave = () => {
-    upsertLog(draft);
-    setSaveMessage("Saved");
-    window.setTimeout(() => setSaveMessage(""), 1200);
+  const toggleTask = async (key: TaskKey) => {
+    if (!draft) return;
+    const previous = draft[key];
+    const next = { ...draft, [key]: !previous };
+    setDraft(next);
+    const ok = await persistDraft(next);
+    if (!ok) {
+      setDraft({ ...next, [key]: previous });
+    }
   };
 
-  const taskCount = getTaskCount(draft);
+  const onSave = async () => {
+    if (!draft) return;
+    await persistDraft(draft);
+  };
+
+  const taskCount = draft
+    ? (taskRows.reduce((sum, task) => sum + (draft[task.key] ? 1 : 0), 0) as number)
+    : 0;
   const earnings = (taskCount * 1.5).toFixed(1);
 
   return (
@@ -118,14 +281,15 @@ function LogEditor({
               <button
                 type="button"
                 onClick={() => toggleTask(task.key)}
-                aria-pressed={draft[task.key]}
+                disabled={!draft}
+                aria-pressed={Boolean(draft?.[task.key])}
                 className={`relative h-7 w-12 rounded-full transition-colors ${
-                  draft[task.key] ? activeChild.accentGradientClass : "bg-surface-high"
+                  draft?.[task.key] ? activeChild.accentGradientClass : "bg-surface-high"
                 }`}
               >
                 <span
                   className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
-                    draft[task.key] ? "translate-x-6" : "translate-x-1"
+                    draft?.[task.key] ? "translate-x-6" : "translate-x-1"
                   }`}
                 />
               </button>
@@ -143,9 +307,10 @@ function LogEditor({
         <button
           type="button"
           onClick={onSave}
+          disabled={!draft}
           className={`rounded-full px-4 py-2 text-xs font-bold text-primary-foreground ${activeChild.accentGradientClass}`}
         >
-          {saveMessage || "Save Log"}
+          {message || "Save Log"}
         </button>
       </section>
     </>
