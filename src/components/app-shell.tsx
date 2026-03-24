@@ -4,7 +4,6 @@ import { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 import { BottomNav } from "@/components/bottom-nav";
-import { ReminderCenter } from "@/components/reminder-center";
 import { TopChildToggle } from "@/components/top-child-toggle";
 import { ChildProvider } from "@/store/child-context";
 
@@ -25,7 +24,6 @@ export function AppShell({ children }: AppShellProps) {
       <div className="mx-auto min-h-screen w-full max-w-md bg-surface pb-24">
         <TopChildToggle />
         <main className="px-4 py-6">{children}</main>
-        <ReminderCenter />
         <BottomNav />
       </div>
     </ChildProvider>

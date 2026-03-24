@@ -8,6 +8,16 @@ import { useChild } from "@/store/child-context";
 
 export default function SettingsPage() {
   const { activeChild } = useChild();
+  const deviceId =
+    typeof window === "undefined"
+      ? ""
+      : (() => {
+          const existing = window.localStorage.getItem("mindful.device.id");
+          if (existing) return existing;
+          const generated = crypto.randomUUID();
+          window.localStorage.setItem("mindful.device.id", generated);
+          return generated;
+        })();
   const initialSaved =
     typeof window === "undefined"
       ? null
@@ -59,6 +69,10 @@ export default function SettingsPage() {
 
   const saveReminder = async () => {
     setMessage("");
+    if (!deviceId) {
+      setMessage("Device ID not ready.");
+      return;
+    }
     if (notificationsOn && "Notification" in window) {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
@@ -71,25 +85,117 @@ export default function SettingsPage() {
     );
     const next = notificationsOn ? computeNextReminder(notifyTime) : "";
     setNextReminder(next);
-    setMessage("Reminder settings saved");
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+    const savePreferenceResponse = await fetch("/api/push/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId,
+        notificationsOn,
+        notifyTime,
+        timezone,
+      }),
+    });
+
+    if (!savePreferenceResponse.ok) {
+      setMessage("Failed to save notification preferences.");
+      return;
+    }
+
+    if (notificationsOn) {
+      const subscribed = await ensurePushSubscription(deviceId);
+      if (!subscribed) return;
+    } else {
+      await disablePushSubscription();
+    }
+
+    setMessage("Reminder settings saved.");
   };
 
-  const sendTestReminder = () => {
-    window.dispatchEvent(new Event("mindful:reminder-test"));
+  const ensurePushSubscription = async (currentDeviceId: string) => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setMessage("Push API is not supported in this browser.");
+      return false;
+    }
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    const keyResponse = await fetch("/api/push/public-key");
+    if (!keyResponse.ok) {
+      setMessage("Failed to load push public key.");
+      return false;
+    }
+    const payload = (await keyResponse.json()) as { publicKey?: string };
+    if (!payload.publicKey) {
+      setMessage("Missing push public key.");
+      return false;
+    }
 
-    if (!("Notification" in window)) {
-      setMessage("In-app reminder shown. Browser notifications unsupported.");
-      return;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(payload.publicKey),
+      });
     }
-    if (Notification.permission !== "granted") {
-      setMessage("In-app reminder shown. Enable browser notifications for system popups.");
-      return;
-    }
-    new Notification("Mindful Curator", {
-      body: "Time to log today's activities.",
-      icon: "/icon.svg",
+
+    const subscribeResponse = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId: currentDeviceId,
+        subscription,
+      }),
     });
-    setMessage("In-app reminder shown and browser notification sent.");
+    if (!subscribeResponse.ok) {
+      setMessage("Failed to save push subscription.");
+      return false;
+    }
+    return true;
+  };
+
+  const disablePushSubscription = async () => {
+    if (!("serviceWorker" in navigator)) return;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+
+    await fetch("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    });
+    await subscription.unsubscribe();
+  };
+
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+  };
+
+  const sendTestReminder = async () => {
+    if (!deviceId) {
+      setMessage("Device ID not ready.");
+      return;
+    }
+    const subscribed = await ensurePushSubscription(deviceId);
+    if (!subscribed) {
+      return;
+    }
+    const response = await fetch("/api/push/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId }),
+    });
+    if (!response.ok) {
+      const errorPayload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      setMessage(errorPayload?.error ?? "Web Push test failed.");
+      return;
+    }
+    setMessage("Web Push test sent.");
   };
 
   return (
@@ -166,7 +272,7 @@ export default function SettingsPage() {
             </p>
           ) : null}
           <p className="mt-2 text-xs text-muted-foreground">
-            Works while app is open. For reminders when app is closed, use Web Push.
+            Scheduled Web Push works even when this tab is closed.
           </p>
           {message ? <p className="mt-2 text-xs text-muted-foreground">{message}</p> : null}
         </div>
