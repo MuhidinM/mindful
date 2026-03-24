@@ -1,5 +1,7 @@
 "use client";
 
+import { Bell, CircleUserRound } from "lucide-react";
+
 import { useChild } from "@/store/child-context";
 
 export function TopChildToggle() {
@@ -16,6 +18,22 @@ export function TopChildToggle() {
             Parent Dashboard
           </h1>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-surface-low hover:text-foreground"
+          >
+            <Bell className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-surface-low hover:text-foreground"
+          >
+            <CircleUserRound className="size-4" />
+          </button>
+        </div>
+      </div>
+      <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 pb-3">
         <div className="flex items-center gap-2 rounded-full bg-surface-low p-1">
           {childOptions.map((child) => {
             const isActive = child.key === selectedChild;
@@ -31,10 +49,8 @@ export function TopChildToggle() {
             );
           })}
         </div>
-      </div>
-      <div className="mx-auto w-full max-w-md px-4 pb-3">
         <p className={`text-xs font-medium ${activeChild.accentTextClass}`}>
-          Active profile: {activeChild.label} ({activeChild.colorName})
+          {activeChild.label}: {activeChild.colorName}
         </p>
       </div>
     </header>
