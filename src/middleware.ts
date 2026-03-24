@@ -3,12 +3,23 @@ import type { NextRequest } from "next/server";
 
 import { AUTH_COOKIE_NAME, AUTH_COOKIE_VALUE } from "@/lib/auth";
 
-const PUBLIC_PATHS = new Set(["/login", "/api/login"]);
+const PUBLIC_PATHS = new Set([
+  "/login",
+  "/api/login",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/icon.svg",
+]);
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (PUBLIC_PATHS.has(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Allow static files through middleware.
+  if (pathname.includes(".")) {
     return NextResponse.next();
   }
 
@@ -22,5 +33,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  matcher: ["/:path*"],
 };
