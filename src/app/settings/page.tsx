@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BellRing, Link2, RefreshCcw, Save, ShieldCheck } from "lucide-react";
 
 import { LogoutButton } from "@/components/logout-button";
@@ -8,20 +8,86 @@ import { useChild } from "@/store/child-context";
 
 export default function SettingsPage() {
   const { activeChild } = useChild();
-  const [notificationsOn, setNotificationsOn] = useState(true);
-  const [notifyTime, setNotifyTime] = useState("20:00");
+  const initialSaved =
+    typeof window === "undefined"
+      ? null
+      : (() => {
+          try {
+            const raw = window.localStorage.getItem(
+              `mindful.reminder.${activeChild.key}`,
+            );
+            if (!raw) return null;
+            return JSON.parse(raw) as {
+              notificationsOn?: boolean;
+              notifyTime?: string;
+            };
+          } catch {
+            return null;
+          }
+        })();
+  const [notificationsOn, setNotificationsOn] = useState(
+    initialSaved?.notificationsOn ?? true,
+  );
+  const [notifyTime, setNotifyTime] = useState(initialSaved?.notifyTime ?? "20:00");
   const [message, setMessage] = useState("");
+  const permissionState: "unsupported" | "default" | "granted" | "denied" =
+    typeof window === "undefined"
+      ? "default"
+      : "Notification" in window
+        ? Notification.permission
+        : "unsupported";
+  const [nextReminder, setNextReminder] = useState<string>("");
+
+  const storageKey = useMemo(
+    () => `mindful.reminder.${activeChild.key}`,
+    [activeChild.key],
+  );
+
+  const computeNextReminder = (timeValue: string) => {
+    const [hoursRaw, minutesRaw] = timeValue.split(":");
+    const hours = Number(hoursRaw);
+    const minutes = Number(minutesRaw);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return "";
+    const now = new Date();
+    const candidate = new Date();
+    candidate.setHours(hours, minutes, 0, 0);
+    if (candidate.getTime() <= now.getTime()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+    return candidate.toLocaleString();
+  };
 
   const saveReminder = async () => {
     setMessage("");
     if (notificationsOn && "Notification" in window) {
-      await Notification.requestPermission();
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setMessage("Notification permission was not granted.");
+      }
     }
     window.localStorage.setItem(
-      `mindful.reminder.${activeChild.key}`,
+      storageKey,
       JSON.stringify({ notificationsOn, notifyTime }),
     );
+    const next = notificationsOn ? computeNextReminder(notifyTime) : "";
+    setNextReminder(next);
     setMessage("Reminder settings saved");
+  };
+
+  const sendTestReminder = () => {
+    if (!("Notification" in window)) {
+      setMessage("This browser does not support notifications.");
+      return;
+    }
+    if (Notification.permission !== "granted") {
+      setMessage("Enable browser notifications first.");
+      return;
+    }
+    new Notification("Mindful Curator", {
+      body: "Time to log today's activities.",
+      icon: "/icon.svg",
+    });
+    setMessage("Test notification sent.");
   };
 
   return (
@@ -80,6 +146,23 @@ export default function SettingsPage() {
               </span>
             </button>
           </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Browser permission: <span className="font-semibold">{permissionState}</span>
+            </p>
+            <button
+              type="button"
+              onClick={sendTestReminder}
+              className="rounded-full px-3 py-1 text-xs font-semibold text-foreground hover:bg-surface-high"
+            >
+              Send Test
+            </button>
+          </div>
+          {nextReminder ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Next reminder: {nextReminder}
+            </p>
+          ) : null}
           {message ? <p className="mt-2 text-xs text-muted-foreground">{message}</p> : null}
         </div>
       </section>
