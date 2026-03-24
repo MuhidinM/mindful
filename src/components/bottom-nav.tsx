@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChartNoAxesColumn, ClipboardCheck, History } from "lucide-react";
+import {
+  ChartNoAxesColumn,
+  ClipboardCheck,
+  History,
+  Settings,
+} from "lucide-react";
 
 import { useChild } from "@/store/child-context";
 
@@ -10,6 +15,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: ChartNoAxesColumn },
   { href: "/log", label: "Log Today", icon: ClipboardCheck },
   { href: "/history", label: "History", icon: History },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
@@ -20,7 +26,7 @@ export function BottomNav() {
     <nav className="fixed inset-x-0 bottom-0 z-20">
       <div className="mx-auto w-full max-w-md px-4 pb-3">
         <div className="glass-panel ghost-border rounded-xl px-2 py-2 shadow-(--shadow-ambient)">
-          <ul className="grid grid-cols-3 gap-1">
+          <ul className="grid grid-cols-4 gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
