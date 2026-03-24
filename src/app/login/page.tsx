@@ -35,37 +35,55 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-low px-4 py-8">
-      <section className="glass-panel ghost-border w-full max-w-sm rounded-xl p-6 shadow-(--shadow-ambient)">
-        <h1 className="text-2xl font-semibold text-foreground">Mindful Login</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Enter the app password to continue.
-        </p>
+    <div className="min-h-screen bg-background text-foreground">
+      <nav className="fixed inset-x-0 top-0 z-20 glass-panel h-20">
+        <div className="mx-auto flex h-full w-full max-w-5xl items-center justify-between px-6">
+          <p className="font-heading text-xl font-bold tracking-tight text-primary">
+            The Mindful Curator
+          </p>
+          <div className="size-9 rounded-full bg-surface-high" />
+        </div>
+      </nav>
 
-        <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-          <label className="block space-y-2">
-            <span className="text-label-md text-foreground">App Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg bg-surface-low px-3 py-2 text-foreground ghost-border focus:bg-surface-lowest focus:outline-none focus:ring-2 focus:ring-primary"
-              required
-            />
-          </label>
+      <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-6 pb-12 pt-24">
+        <section className="w-full max-w-md rounded-lg bg-surface-lowest p-8 shadow-(--shadow-ambient) ghost-border md:p-10">
+          <header className="mb-8">
+            <h1 className="font-heading text-3xl font-extrabold tracking-tight text-foreground">
+              Welcome back, curator.
+            </h1>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Enter your app password to continue.
+            </p>
+          </header>
 
-          {error ? <p className="text-sm text-secondary">{error}</p> : null}
+          <form className="space-y-7" onSubmit={onSubmit}>
+            <label className="block space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                App Password
+              </span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full border-0 border-b border-b-border bg-surface-low px-0 py-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-b-primary focus:outline-none focus:ring-0"
+                placeholder="Enter your password"
+                required
+              />
+            </label>
 
-          <Button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-full bg-signature-teal text-primary-foreground hover:opacity-95"
-          >
-            {isSubmitting ? "Signing in..." : "Sign In"}
-          </Button>
-        </form>
-      </section>
-    </main>
+            {error ? <p className="text-sm text-secondary">{error}</p> : null}
+
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full rounded-full bg-signature-teal py-6 text-sm font-bold tracking-wide text-primary-foreground hover:opacity-95"
+            >
+              {isSubmitting ? "Signing in..." : "Sign In to Dashboard"}
+            </Button>
+          </form>
+        </section>
+      </main>
+    </div>
   );
 }
