@@ -31,7 +31,7 @@ type ChildContextValue = {
 const childThemes: Record<ChildKey, ChildTheme> = {
   child1: {
     key: "child1",
-    label: "Child 1",
+    label: "Naif",
     colorName: "Teal",
     activeToggleClass: "bg-primary text-primary-foreground",
     mutedToggleClass: "bg-surface-high text-muted-foreground",
@@ -41,7 +41,7 @@ const childThemes: Record<ChildKey, ChildTheme> = {
   },
   child2: {
     key: "child2",
-    label: "Child 2",
+    label: "Hamza",
     colorName: "Coral",
     activeToggleClass: "bg-secondary text-secondary-foreground",
     mutedToggleClass: "bg-surface-high text-muted-foreground",

@@ -75,19 +75,21 @@ export default function SettingsPage() {
   };
 
   const sendTestReminder = () => {
+    window.dispatchEvent(new Event("mindful:reminder-test"));
+
     if (!("Notification" in window)) {
-      setMessage("This browser does not support notifications.");
+      setMessage("In-app reminder shown. Browser notifications unsupported.");
       return;
     }
     if (Notification.permission !== "granted") {
-      setMessage("Enable browser notifications first.");
+      setMessage("In-app reminder shown. Enable browser notifications for system popups.");
       return;
     }
     new Notification("Mindful Curator", {
       body: "Time to log today's activities.",
       icon: "/icon.svg",
     });
-    setMessage("Test notification sent.");
+    setMessage("In-app reminder shown and browser notification sent.");
   };
 
   return (
@@ -116,8 +118,8 @@ export default function SettingsPage() {
             }`}
           >
             <span
-              className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
-                notificationsOn ? "translate-x-6" : "translate-x-1"
+              className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform ${
+                notificationsOn ? "translate-x-5" : "translate-x-0"
               }`}
             />
           </button>
@@ -163,6 +165,9 @@ export default function SettingsPage() {
               Next reminder: {nextReminder}
             </p>
           ) : null}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Works while app is open. For reminders when app is closed, use Web Push.
+          </p>
           {message ? <p className="mt-2 text-xs text-muted-foreground">{message}</p> : null}
         </div>
       </section>

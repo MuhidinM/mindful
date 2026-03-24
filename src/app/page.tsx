@@ -125,6 +125,29 @@ export default function HomePage() {
   const todayCount = todayLog
     ? TASK_KEYS.reduce((sum, key) => sum + (todayLog[key] ? 1 : 0), 0)
     : 0;
+  const progressPercent = Math.round((todayCount / 7) * 100);
+  const ringRadius = 50;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset = ringCircumference * (1 - todayCount / 7);
+
+  const recentActivity = useMemo(() => {
+    const logByDate = new Map(
+      dailyLogs.map((log) => {
+        const count = TASK_KEYS.reduce((sum, key) => sum + (log[key] ? 1 : 0), 0);
+        return [log.date, count] as const;
+      }),
+    );
+    const today = new Date();
+    return [1, 2, 3].map((offsetDays) => {
+      const target = new Date(today);
+      target.setDate(today.getDate() - offsetDays);
+      const dateKey = target.toISOString().slice(0, 10);
+      const count = logByDate.get(dateKey) ?? 0;
+      const amount = (count * 1.5).toFixed(1);
+      const label = offsetDays === 1 ? "Yesterday" : `${offsetDays} Days Ago`;
+      return { label, count, amount };
+    });
+  }, [dailyLogs]);
 
   const onRedeem = async () => {
     const amount = Number(redeemAmount);
@@ -197,10 +220,33 @@ export default function HomePage() {
           Today&apos;s Progress
         </p>
         <div className="mx-auto mt-5 flex size-40 items-center justify-center rounded-full bg-surface-low">
-          <div className="flex size-32 items-center justify-center rounded-full border-10 border-surface-high">
-            <div>
+          <div className="relative flex size-32 items-center justify-center">
+            <svg className="size-32 -rotate-90" viewBox="0 0 120 120">
+              <circle
+                cx="60"
+                cy="60"
+                r={ringRadius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="10"
+                className="text-surface-high"
+              />
+              <circle
+                cx="60"
+                cy="60"
+                r={ringRadius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringOffset}
+                className={activeChild.accentTextClass}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
               <p className="text-3xl font-extrabold text-foreground">{todayCount} / 7</p>
-              <p className="text-xs text-muted-foreground">Tasks Done</p>
+              <p className="text-xs text-muted-foreground">{progressPercent}%</p>
             </div>
           </div>
         </div>
@@ -211,21 +257,19 @@ export default function HomePage() {
 
       <section className="rounded-lg bg-surface-low p-2">
         <div className="overflow-hidden rounded-lg bg-surface-lowest shadow-(--shadow-ambient)">
-          {["Yesterday", "2 Days Ago", "3 Days Ago"].map((label) => (
+          {recentActivity.map((item) => (
             <div
-              key={label}
+              key={item.label}
               className="flex items-center justify-between px-5 py-4 even:bg-surface-low/40"
             >
               <div>
-                <p className="text-sm font-semibold text-foreground">{label}</p>
+                <p className="text-sm font-semibold text-foreground">{item.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  {isLoading ? "Loading..." : "Synced from Supabase"}
+                  {isLoading ? "Loading..." : `${item.count}/7 tasks`}
                 </p>
               </div>
               <p className={`text-sm font-extrabold ${activeChild.accentTextClass}`}>
-                {label === "Yesterday"
-                  ? `${(dailyLogs.length > 0 ? 1.5 : 0).toFixed(1)} Birr`
-                  : "+0.0 Birr"}
+                +{item.amount} Birr
               </p>
             </div>
           ))}
